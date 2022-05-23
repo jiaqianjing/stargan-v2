@@ -233,16 +233,16 @@ def compute_g_loss(nets, args, x_real, y_org, y_trg, z_trgs=None, x_refs=None, m
 
     # adversarial loss
     if z_trgs is not None:
-        s_trg = nets.mapping_network(z_trg, y_trg)
+        s_trg = nets.mapping_network(z_trg, y_trg) # [B, 64]
     else:
-        s_trg = nets.style_encoder(x_ref, y_trg)
+        s_trg = nets.style_encoder(x_ref, y_trg) # [B, 64]
 
-    x_fake = nets.generator(x_real, s_trg, masks=masks)
-    out = nets.discriminator(x_fake, y_trg)
+    x_fake = nets.generator(x_real, s_trg, masks=masks) # [B, 3, 256, 256]
+    out = nets.discriminator(x_fake, y_trg) # [B]
     loss_adv = adv_loss(out, 1)
 
     # style reconstruction loss
-    s_pred = nets.style_encoder(x_fake, y_trg)
+    s_pred = nets.style_encoder(x_fake, y_trg) # [B, 64]
     loss_sty = torch.mean(torch.abs(s_pred - s_trg))
 
     # diversity sensitive loss
