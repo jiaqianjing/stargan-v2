@@ -202,19 +202,20 @@ def compute_d_loss(nets, args, x_real, y_org, y_trg, z_trg=None, x_ref=None, mas
     assert (z_trg is None) != (x_ref is None)
     # with real images
     x_real.requires_grad_()
-    out = nets.discriminator(x_real, y_org)
+    out = nets.discriminator(x_real, y_org) # multi-task dis; shape: [B, 1] , x_real 属于 y_org 的概率
     loss_real = adv_loss(out, 1)
     loss_reg = r1_reg(out, x_real)
 
     # with fake images
     with torch.no_grad():
         if z_trg is not None:
-            s_trg = nets.mapping_network(z_trg, y_trg)
+            # training phase
+            s_trg = nets.mapping_network(z_trg, y_trg) # latent code -> 属于 y_trg 域 style code, [B, 64]
         else:  # x_ref is not None
-            s_trg = nets.style_encoder(x_ref, y_trg)
+            s_trg = nets.style_encoder(x_ref, y_trg) # x_ref -> 属于 y_trg 域 style code, [B, 64]
 
         x_fake = nets.generator(x_real, s_trg, masks=masks)
-    out = nets.discriminator(x_fake, y_trg)
+    out = nets.discriminator(x_fake, y_trg) # [B, 1], x_fake 属于 y_trg 的概率
     loss_fake = adv_loss(out, 0)
 
     loss = loss_real + loss_fake + args.lambda_reg * loss_reg

@@ -179,7 +179,7 @@ class InputFetcher:
         try:
             x, y = next(self.iter)
         except (AttributeError, StopIteration):
-            self.iter = iter(self.loader)
+            self.iter = iter(self.loader)    # 每次 epoch 首次遍历
             x, y = next(self.iter)
         return x, y
 
@@ -187,7 +187,7 @@ class InputFetcher:
         try:
             x, x2, y = next(self.iter_ref)
         except (AttributeError, StopIteration):
-            self.iter_ref = iter(self.loader_ref)
+            self.iter_ref = iter(self.loader_ref) # 每次 epoch 首次遍历
             x, x2, y = next(self.iter_ref)
         return x, x2, y
 

@@ -71,10 +71,10 @@ class AdaIN(nn.Module):
         self.fc = nn.Linear(style_dim, num_features*2)
 
     def forward(self, x, s):
-        h = self.fc(s)
-        h = h.view(h.size(0), h.size(1), 1, 1)
-        gamma, beta = torch.chunk(h, chunks=2, dim=1)
-        return (1 + gamma) * self.norm(x) + beta
+        h = self.fc(s) # [B, 64] -> [B, 1024]
+        h = h.view(h.size(0), h.size(1), 1, 1)  # [B, 1024, 1, 1]
+        gamma, beta = torch.chunk(h, chunks=2, dim=1) # [B ,512, 1, 1], [B, 512, 1, 1]
+        return (1 + gamma) * self.norm(x) + beta  # shape as x
 
 
 class AdainResBlk(nn.Module):
@@ -136,7 +136,7 @@ class HighPass(nn.Module):
 class Generator(nn.Module):
     def __init__(self, img_size=256, style_dim=64, max_conv_dim=512, w_hpf=1):
         super().__init__()
-        dim_in = 2**14 // img_size
+        dim_in = 2**14 // img_size   # 2**6=64
         self.img_size = img_size
         self.from_rgb = nn.Conv2d(3, dim_in, 3, 1, 1)
         self.encode = nn.ModuleList()
@@ -172,22 +172,29 @@ class Generator(nn.Module):
             self.hpf = HighPass(w_hpf, device)
 
     def forward(self, x, s, masks=None):
-        x = self.from_rgb(x)
+        x = self.from_rgb(x)  # [B, 3, 256, 256] -> [B, style_dim, 256, 256]
         cache = {}
+        # [B, style_dim, 256, 256] -> [B, 512, 16, 16]
         for block in self.encode:
             if (masks is not None) and (x.size(2) in [32, 64, 128]):
                 cache[x.size(2)] = x
             x = block(x)
+        # [B, 512, 16, 16] -> [B, 64, 256, 256]
         for block in self.decode:
             x = block(x, s)
             if (masks is not None) and (x.size(2) in [32, 64, 128]):
                 mask = masks[0] if x.size(2) in [32] else masks[1]
                 mask = F.interpolate(mask, size=x.size(2), mode='bilinear')
                 x = x + self.hpf(mask * cache[x.size(2)])
-        return self.to_rgb(x)
+        return self.to_rgb(x) # [B, 3, 256, 256]
 
 
 class MappingNetwork(nn.Module):
+    """MappingNetwork
+    从 latent code 抽出属于 y 域的 style code
+    param z: shape [B, 16], latent code
+    param y: shape [B, 1], domain label
+    """
     def __init__(self, latent_dim=16, style_dim=64, num_domains=2):
         super().__init__()
         layers = []
@@ -222,11 +229,11 @@ class MappingNetwork(nn.Module):
 class StyleEncoder(nn.Module):
     def __init__(self, img_size=256, style_dim=64, num_domains=2, max_conv_dim=512):
         super().__init__()
-        dim_in = 2**14 // img_size
+        dim_in = 2**14 // img_size # 64
         blocks = []
         blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
 
-        repeat_num = int(np.log2(img_size)) - 2
+        repeat_num = int(np.log2(img_size)) - 2 # 6
         for _ in range(repeat_num):
             dim_out = min(dim_in*2, max_conv_dim)
             blocks += [ResBlk(dim_in, dim_out, downsample=True)]
@@ -242,8 +249,8 @@ class StyleEncoder(nn.Module):
             self.unshared += [nn.Linear(dim_out, style_dim)]
 
     def forward(self, x, y):
-        h = self.shared(x)
-        h = h.view(h.size(0), -1)
+        h = self.shared(x) # [B, 3, 256, 256] -> [B, 512, 1, 1]
+        h = h.view(h.size(0), -1) # [B, 512]
         out = []
         for layer in self.unshared:
             out += [layer(h)]
@@ -254,29 +261,33 @@ class StyleEncoder(nn.Module):
 
 
 class Discriminator(nn.Module):
+    """Discriminator
+    对 x 进行下采样(残差连接)，输出 x 属于域 y 的 logits
+    """
     def __init__(self, img_size=256, num_domains=2, max_conv_dim=512):
         super().__init__()
-        dim_in = 2**14 // img_size
+        dim_in = 2**14 // img_size # 64
         blocks = []
         blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
 
-        repeat_num = int(np.log2(img_size)) - 2
+        repeat_num = int(np.log2(img_size)) - 2 # 6 个 resblk (downsample)
+        # [B, dim_in, 256, 256] -> [B, 512, 4, 4]
         for _ in range(repeat_num):
             dim_out = min(dim_in*2, max_conv_dim)
             blocks += [ResBlk(dim_in, dim_out, downsample=True)]
             dim_in = dim_out
 
         blocks += [nn.LeakyReLU(0.2)]
-        blocks += [nn.Conv2d(dim_out, dim_out, 4, 1, 0)]
+        blocks += [nn.Conv2d(dim_out, dim_out, 4, 1, 0)] # [B, 512, 4, 4] -> [B, 512, 1, 1]
         blocks += [nn.LeakyReLU(0.2)]
-        blocks += [nn.Conv2d(dim_out, num_domains, 1, 1, 0)]
+        blocks += [nn.Conv2d(dim_out, num_domains, 1, 1, 0)] #[B, 512, 1, 1] -> [B, num_domains, 1, 1]
         self.main = nn.Sequential(*blocks)
 
     def forward(self, x, y):
-        out = self.main(x)
-        out = out.view(out.size(0), -1)  # (batch, num_domains)
+        out = self.main(x) # [B, 3, 256, 256] -> [B, num_domains, 1, 1]
+        out = out.view(out.size(0), -1)  # [B, num_domains]
         idx = torch.LongTensor(range(y.size(0))).to(y.device)
-        out = out[idx, y]  # (batch)
+        out = out[idx, y]  # [B, num_domains] -> [B]
         return out
 
 
