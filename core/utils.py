@@ -61,6 +61,13 @@ def save_image(x, ncol, filename):
 
 @torch.no_grad()
 def translate_and_reconstruct(nets, args, x_src, y_src, x_ref, y_ref, filename):
+    """
+    Grid Img Format:
+        | src_0 | src_1 | ... |
+        | ref_0 | ref_1 | ... |
+        | gen_0 | gen_1 | ... |
+        | rec_0 | rec_1 | ... |
+    """
     N, C, H, W = x_src.size()
     s_ref = nets.style_encoder(x_ref, y_ref)
     masks = nets.fan.get_heatmap(x_src) if args.w_hpf > 0 else None
@@ -76,6 +83,16 @@ def translate_and_reconstruct(nets, args, x_src, y_src, x_ref, y_ref, filename):
 
 @torch.no_grad()
 def translate_using_latent(nets, args, x_src, y_trg_list, z_trg_list, psi, filename):
+    """
+    Grid Img Format:
+        | src_0    | src_1    | scr_2    | ... |
+        | gen_y0_0 | gen_y0_1 | gen_y0_2 | ... |
+        | ...      | ...      | ...      | ... |
+        | gen_y1_0 | gen_y1_1 | gen_y1_2 | ... |
+        | ...      | ...      | ...      | ... |
+        | gen_y2_0 | gen_y2_1 | gen_y2_2 | ... |
+        | ...      | ...      | ...      | ... |
+    """
     N, C, H, W = x_src.size()
     latent_dim = z_trg_list[0].size(1)
     x_concat = [x_src]
@@ -100,16 +117,25 @@ def translate_using_latent(nets, args, x_src, y_trg_list, z_trg_list, psi, filen
 
 @torch.no_grad()
 def translate_using_reference(nets, args, x_src, x_ref, y_ref, filename):
+    """
+    Grid Img Format:
+        |       | src_0  | src_1  | src_2  | ... |
+        | ref_0 | gen_00 | gen_01 | gen_02 | ... |
+        | ref_1 | gen_10 | gen_11 | gen_12 | ... |
+        | ...   | ...    | ...    | ...    | ... |
+    """
     N, C, H, W = x_src.size()
     wb = torch.ones(1, C, H, W).to(x_src.device)
-    x_src_with_wb = torch.cat([wb, x_src], dim=0)
+    # 给批 src 图片头部，插入一张空白图片
+    x_src_with_wb = torch.cat([wb, x_src], dim=0) # [B+1, C, H, W]
 
     masks = nets.fan.get_heatmap(x_src) if args.w_hpf > 0 else None
-    s_ref = nets.style_encoder(x_ref, y_ref)
-    s_ref_list = s_ref.unsqueeze(1).repeat(1, N, 1)
+    s_ref = nets.style_encoder(x_ref, y_ref) # [B, style_dim]
+    s_ref_list = s_ref.unsqueeze(1).repeat(1, N, 1) # [B, B, style_dim]
     x_concat = [x_src_with_wb]
     for i, s_ref in enumerate(s_ref_list):
         x_fake = nets.generator(x_src, s_ref, masks=masks)
+        # 给生成的批图片头部，插入对应的 ref 图片
         x_fake_with_ref = torch.cat([x_ref[i:i+1], x_fake], dim=0)
         x_concat += [x_fake_with_ref]
 
